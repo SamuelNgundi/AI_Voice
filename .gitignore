@@ -105,3 +105,6 @@ $RECYCLE.BIN/
 *.tar.gz
 .temp/
 .tmp/
+
+.vercel
+.env*

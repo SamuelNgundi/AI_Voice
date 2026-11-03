@@ -19,7 +19,7 @@ export default function initVoiceRequest(
 
     const voiceRequest = new window.Houndify.VoiceRequest({
         clientId,
-        authURL: "/houndifyAuth",
+        authURL: "/api/houndifyAuth",
 
         //REQUEST INFO JSON
         //See https://houndify.com/reference/RequestInfo

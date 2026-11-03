@@ -136,82 +136,48 @@ function validateHoundifyConfig(rawId, rawKey) {
 }
 
 // ---------------------------------------------------------------------------
-// App factory — exported for tests. Wires middleware + routes but does not
-// bind to a port.
+// Shared API router. The exact same handlers power both the local Express
+// server (createApp) and the Vercel Serverless Function (createApiApp), so
+// behavior stays identical across environments. Mount it under any prefix.
+//   limits: { authMax, configMax, textMax } override the rate-limiter caps
+//           (used by the test suite; default to sane production values).
 // ---------------------------------------------------------------------------
-function createApp(overrides = {}) {
-    const config =
-        overrides.config ||
-        validateHoundifyConfig(
-            process.env.HOUNDIFY_CLIENT_ID,
-            process.env.HOUNDIFY_CLIENT_KEY
-        );
+function buildApiRouter(config, limits = {}) {
+    const router = express.Router();
 
-    const buildDir = overrides.buildDir || path.join(__dirname, "build");
-    const indexHtml = path.join(buildDir, "index.html");
-    const buildExists = fs.existsSync(indexHtml);
-
-    const app = express();
-    app.disable("x-powered-by");
-    app.set("trust proxy", 1);
-
-    // Gzip responses (large CRA bundles benefit heavily).
-    app.use(compression());
-
-    // Body parsing for the text proxy.
-    app.use(express.json({ limit: "64kb" }));
-
-    // Static assets: hashed CRA chunks can be cached aggressively.
-    if (buildExists) {
-        app.use(
-            "/static",
-            express.static(path.join(buildDir, "static"), {
-                maxAge: "1y",
-                immutable: true,
-            })
-        );
-        app.use(express.static(buildDir, { index: false, maxAge: 0 }));
-    }
-
-    // --- Rate limiting ---------------------------------------------------
     // Tight limit on the auth endpoint: it is an HMAC signing oracle and
     // should not be hammered. The browser only calls it once per query.
     const authLimiter = rateLimit({
         windowMs: 60 * 1000,
-        max: overrides.authMax || 30,
+        max: limits.authMax || 30,
         standardHeaders: true,
         legacyHeaders: false,
         message: { error: "Too many auth requests; try again later." },
     });
     const configLimiter = rateLimit({
         windowMs: 60 * 1000,
-        max: overrides.configMax || 60,
+        max: limits.configMax || 60,
         standardHeaders: true,
         legacyHeaders: false,
     });
     const textLimiter = rateLimit({
         windowMs: 60 * 1000,
-        max: overrides.textMax || 20,
+        max: limits.textMax || 20,
         standardHeaders: true,
         legacyHeaders: false,
     });
 
-    // --- Routes ----------------------------------------------------------
-    app.get("/healthz", (_req, res) => {
-        res.json({
-            ok: true,
-            uptime: process.uptime(),
-            buildServed: buildExists,
-        });
+    router.get("/healthz", (_req, res) => {
+        res.json({ ok: true, uptime: process.uptime() });
     });
 
-    app.get("/houndifyConfig", configLimiter, (_req, res) => {
+    router.get("/houndifyConfig", configLimiter, (_req, res) => {
         res.set("Cache-Control", "no-store").json({
             clientId: config.clientId,
         });
     });
 
-    app.get("/houndifyAuth", authLimiter, (req, res, next) => {
+    router.get("/houndifyAuth", authLimiter, (req, res, next) => {
         // The houndify handler assumes a string `token`. Reject malformed
         // requests with a proper 4xx instead of blowing up with a 500.
         if (typeof req.query.token !== "string" || !req.query.token) {
@@ -232,7 +198,7 @@ function createApp(overrides = {}) {
     // Text query endpoint — uses houndify's own TextRequest class so the
     // auth-header format matches whatever the SDK is tested against.
     // The client key stays here on the server; the browser never sees it.
-    app.post("/houndifyText", textLimiter, async (req, res) => {
+    router.post("/houndifyText", textLimiter, async (req, res) => {
         const {
             query,
             conversationState,
@@ -303,6 +269,63 @@ function createApp(overrides = {}) {
         }
     });
 
+    // Centralized error handler for anything that reaches the router via
+    // next(err) — keeps stack traces off the wire.
+    // eslint-disable-next-line no-unused-vars
+    router.use((err, _req, res, _next) => {
+        if (process.env.NODE_ENV !== "production") {
+            console.error(err);
+        }
+        res.status(500).json({ error: "Internal server error" });
+    });
+
+    return router;
+}
+
+// ---------------------------------------------------------------------------
+// App factory — exported for tests. Wires middleware + routes but does not
+// bind to a port.
+// ---------------------------------------------------------------------------
+function createApp(overrides = {}) {
+    const config =
+        overrides.config ||
+        validateHoundifyConfig(
+            process.env.HOUNDIFY_CLIENT_ID,
+            process.env.HOUNDIFY_CLIENT_KEY
+        );
+
+    const buildDir = overrides.buildDir || path.join(__dirname, "build");
+    const indexHtml = path.join(buildDir, "index.html");
+    const buildExists = fs.existsSync(indexHtml);
+
+    const app = express();
+    app.disable("x-powered-by");
+    app.set("trust proxy", 1);
+
+    // Gzip responses (large CRA bundles benefit heavily).
+    app.use(compression());
+
+    // Body parsing for the text proxy.
+    app.use(express.json({ limit: "64kb" }));
+
+    // Static assets: hashed CRA chunks can be cached aggressively.
+    if (buildExists) {
+        app.use(
+            "/static",
+            express.static(path.join(buildDir, "static"), {
+                maxAge: "1y",
+                immutable: true,
+            })
+        );
+        app.use(express.static(buildDir, { index: false, maxAge: 0 }));
+    }
+
+    // --- API routes (shared with the serverless build) -----------------
+    // Mounted at both the bare path (matches the CRA dev proxy) and under
+    // /api (matches how Vercel serves the function). Same handlers either way.
+    app.use(buildApiRouter(config, overrides));
+    app.use("/api", buildApiRouter(config, overrides));
+
     // SPA fallback: any GET not matching an API route serves index.html so
     // client-side routing keeps working on hard refreshes.
     if (buildExists) {
@@ -318,6 +341,45 @@ function createApp(overrides = {}) {
     }
 
     // Centralized error handler — keeps stack traces off the wire.
+    // eslint-disable-next-line no-unused-vars
+    app.use((err, _req, res, _next) => {
+        if (process.env.NODE_ENV !== "production") {
+            console.error(err);
+        }
+        res.status(500).json({ error: "Internal server error" });
+    });
+
+    return app;
+}
+
+// ---------------------------------------------------------------------------
+// Serverless API app — for Vercel (and other serverless Node runtimes). Same
+// API routes as createApp, but WITHOUT static-file serving or the SPA
+// fallback, because Vercel serves the CRA `build/` as static assets itself.
+// Exported from api/[...all].js and invoked as a (req, res) listener.
+// ---------------------------------------------------------------------------
+function createApiApp(overrides = {}) {
+    const config =
+        overrides.config ||
+        validateHoundifyConfig(
+            process.env.HOUNDIFY_CLIENT_ID,
+            process.env.HOUNDIFY_CLIENT_KEY
+        );
+
+    const app = express();
+    app.disable("x-powered-by");
+    // Behind Vercel's proxy, trust X-Forwarded-* so the rate limiter and
+    // redirects see the real client/protocol.
+    app.set("trust proxy", 1);
+
+    app.use(compression());
+    app.use(express.json({ limit: "64kb" }));
+
+    // Mount under /api (how Vercel delivers the path) and bare (in case the
+    // runtime strips the prefix) so req.url matching is robust either way.
+    app.use("/api", buildApiRouter(config, overrides));
+    app.use("/", buildApiRouter(config, overrides));
+
     // eslint-disable-next-line no-unused-vars
     app.use((err, _req, res, _next) => {
         if (process.env.NODE_ENV !== "production") {
@@ -373,4 +435,10 @@ if (require.main === module) {
     startServer();
 }
 
-module.exports = { createApp, startServer, validateHoundifyConfig };
+module.exports = {
+    createApp,
+    createApiApp,
+    buildApiRouter,
+    startServer,
+    validateHoundifyConfig,
+};

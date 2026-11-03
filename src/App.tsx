@@ -234,7 +234,7 @@ function App() {
 
         const loadHoundifyConfig = async () => {
             try {
-                const response = await fetch("/houndifyConfig", {
+                const response = await fetch("/api/houndifyConfig", {
                     signal: controller.signal,
                 });
                 if (!response.ok) {

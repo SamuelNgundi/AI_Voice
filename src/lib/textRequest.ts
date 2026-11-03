@@ -30,7 +30,7 @@ export type TextQueryResult = TextQuerySuccess | TextQueryFailure;
 
 export async function textQuery(opts: TextQueryOptions): Promise<TextQueryResult> {
     try {
-        const res = await fetch("/houndifyText", {
+        const res = await fetch("/api/houndifyText", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
