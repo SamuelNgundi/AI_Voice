@@ -1,0 +1,54 @@
+.field {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    z-index: 0;
+    pointer-events: none;
+}
+
+.bubble {
+    position: absolute;
+    bottom: -140px;
+    border-radius: 50%;
+    opacity: 0;
+    will-change: transform, opacity;
+    animation: bubbleRise var(--duration) linear infinite;
+    animation-delay: var(--delay);
+}
+
+// Rises from below the viewport to above it, drifting sideways on the way
+// up and gently inflating. Fades in near the bottom and out near the top.
+@keyframes bubbleRise {
+    0% {
+        transform: translate3d(0, 0, 0) scale(0.6);
+        opacity: 0;
+    }
+    12% {
+        opacity: 0.85;
+    }
+    50% {
+        transform: translate3d(var(--sway), -60vh, 0) scale(1);
+        opacity: 0.9;
+    }
+    88% {
+        opacity: 0.6;
+    }
+    100% {
+        transform: translate3d(calc(var(--sway) * -0.6), -122vh, 0) scale(1.12);
+        opacity: 0;
+    }
+}
+
+// While the app is "listening", speed the bubbles up a touch for a
+// reactive feel. App toggles this via the `active` prop on <Bubbles />.
+.fieldActive .bubble {
+    animation-duration: calc(var(--duration) * 0.55);
+    filter: brightness(1.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bubble {
+        animation: none;
+        opacity: 0;
+    }
+}

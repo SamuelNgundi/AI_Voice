@@ -1,0 +1,43 @@
+.chatLog {
+    width: 90%;
+    max-width: 640px;
+    max-height: 35vh;
+    overflow-y: auto;
+    margin: 20px auto 0;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.turn {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bubble {
+    padding: 8px 14px;
+    border-radius: 14px;
+    max-width: 85%;
+    line-height: 1.4;
+    word-wrap: break-word;
+    font-size: 14px;
+}
+
+.user {
+    align-self: flex-end;
+    background: #2ebf91;
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+
+.assistant {
+    align-self: flex-start;
+    background: #ffffff;
+    color: #333;
+    border-bottom-left-radius: 4px;
+}
