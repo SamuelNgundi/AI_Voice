@@ -136,6 +136,101 @@ function validateHoundifyConfig(rawId, rawKey) {
 }
 
 // ---------------------------------------------------------------------------
+// IP-based coarse location (no device permissions).
+// Resolved server-side from the real client IP, then sent to the browser via
+// /houndifyConfig so voice and text queries can include Latitude/Longitude.
+// City-level accuracy is the ceiling for IP geolocation — plenty for
+// "weather / nearby" style queries. Failures are silent: queries simply go
+// out without location instead of being blocked.
+// ---------------------------------------------------------------------------
+const LOCATION_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const locationCache = new Map(); // ip -> { coords, expires }
+
+// IPv4 + IPv4-mapped-IPv6 private/loopback ranges. Local dev traffic is
+// private, so we skip the lookup instead of wasting ipinfo calls (a private
+// `ip` value makes the whole session share one cached "" → null entry).
+const PRIVATE_IP_RE =
+    /^(?:127\.|10\.|192\.168\.|0\.|172\.(?:1[6-9]|2[0-9]|3[01])\.|::1|localhost|(?:::ffff:)?(?:127\.|10\.|192\.168\.|0\.|172\.(?:1[6-9]|2[0-9]|3[01])\.))/i;
+
+function isPrivateIp(ip) {
+    return !ip || PRIVATE_IP_RE.test(ip);
+}
+
+async function fetchCoords(url) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) return null;
+        const body = await res.json();
+        if (!body || typeof body.loc !== "string") return null;
+        const [lat, lng] = body.loc.split(",").map(Number);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return { latitude: lat, longitude: lng };
+    } catch {
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/**
+ * Coarse lat/lng for a request's client IP, or null when unavailable
+ * (private IP, rate-limited upstream, timeout, VPN anycast, etc.).
+ * `fetchImpl` is injectable for tests.
+ */
+async function resolveClientLocation(req, fetchImpl = fetch) {
+    const ip = req.ip || req.connection?.remoteAddress || "";
+    if (isPrivateIp(ip)) return null;
+
+    const now = Date.now();
+    const hit = locationCache.get(ip);
+    if (hit && hit.expires > now) return hit.coords;
+
+    // Authenticated requests get a higher (documented) quota; anonymous
+    // fallbacks are fine for a low-traffic personal assistant.
+    const token = process.env.IPINFO_TOKEN;
+    const url = token
+        ? `https://ipinfo.io/${encodeURIComponent(ip)}/json?token=${encodeURIComponent(token)}`
+        : `https://ipinfo.io/${encodeURIComponent(ip)}/json`;
+    const coords = await fetchCoordsWith(url, fetchImpl);
+    // Cache misses too (shorter TTL) so a flaky upstream isn't retried on
+    // every page load.
+    const ttl = coords ? LOCATION_CACHE_TTL_MS : 60 * 1000;
+    locationCache.set(ip, { coords, expires: now + ttl });
+    if (locationCache.size > 500) {
+        // Crude memory guard: drop expired entries, then oldest half.
+        for (const [key, value] of locationCache) {
+            if (value.expires <= now) locationCache.delete(key);
+        }
+        if (locationCache.size > 500) {
+            let toDelete = Math.floor(locationCache.size / 2);
+            for (const key of locationCache.keys()) {
+                if (toDelete-- <= 0) break;
+                locationCache.delete(key);
+            }
+        }
+    }
+    return coords;
+}
+
+async function fetchCoordsWith(url, fetchImpl) {
+    if (fetchImpl === fetch) return fetchCoords(url);
+    // Test-injected fetch: mimic the timeout-less path.
+    try {
+        const res = await fetchImpl(url);
+        if (!res.ok) return null;
+        const body = await res.json();
+        if (!body || typeof body.loc !== "string") return null;
+        const [lat, lng] = body.loc.split(",").map(Number);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return { latitude: lat, longitude: lng };
+    } catch {
+        return null;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shared API router. The exact same handlers power both the local Express
 // server (createApp) and the Vercel Serverless Function (createApiApp), so
 // behavior stays identical across environments. Mount it under any prefix.
@@ -171,9 +266,14 @@ function buildApiRouter(config, limits = {}) {
         res.json({ ok: true, uptime: process.uptime() });
     });
 
-    router.get("/houndifyConfig", configLimiter, (_req, res) => {
+    router.get("/houndifyConfig", configLimiter, async (req, res) => {
+        // Coarse, permission-free location for both query flows. Best-effort:
+        // on any failure the client just sends no coordinates.
+        const coords = await resolveClientLocation(req).catch(() => null);
         res.set("Cache-Control", "no-store").json({
             clientId: config.clientId,
+            latitude: coords ? coords.latitude : undefined,
+            longitude: coords ? coords.longitude : undefined,
         });
     });
 
@@ -441,4 +541,6 @@ module.exports = {
     buildApiRouter,
     startServer,
     validateHoundifyConfig,
+    resolveClientLocation,
+    isPrivateIp,
 };

@@ -2,7 +2,8 @@
     position: absolute;
     inset: 0;
     overflow: hidden;
-    z-index: 0;
+    // Above the orb + its fade, below the interactive content layer.
+    z-index: 1;
     pointer-events: none;
 }
 
@@ -46,9 +47,14 @@
     filter: brightness(1.1);
 }
 
+// Reduced motion: no rising animation, but keep bubbles visible as soft
+// static circles. (Windows turns off Animation effects by default on many
+// setups, which reports `reduce` — hiding them entirely made the effect
+// invisible on desktops.)
 @media (prefers-reduced-motion: reduce) {
     .bubble {
         animation: none;
-        opacity: 0;
+        opacity: 0.5;
+        bottom: 15vh; // rest at a visible position instead of off-screen
     }
 }

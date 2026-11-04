@@ -1,11 +1,24 @@
 // lib/initVoiceRequest.ts
 import { RequestHandlers } from "./types";
 
+export interface VoiceRequestLocation {
+    latitude: number;
+    longitude: number;
+}
+
+// Last-resort coarse fallback (Nairobi) used only when the server could not
+// resolve a location for the client's IP (private network, VPN, outage).
+const FALLBACK_LOCATION: VoiceRequestLocation = {
+    latitude: -1.292066,
+    longitude: 36.821945,
+};
+
 export default function initVoiceRequest(
     clientId: string,
     recorder: HoundifyAudioRecorder,
     conversationState: HoundifyConversationState | null,
-    handlers: RequestHandlers
+    handlers: RequestHandlers,
+    location?: VoiceRequestLocation | null
 ): HoundifyVoiceRequest {
     if (!clientId) {
         throw new Error("Houndify client ID was not provided by the server.");
@@ -17,6 +30,10 @@ export default function initVoiceRequest(
         );
     }
 
+    // Server-resolved IP coordinates when available; static fallback keeps
+    // location-dependent domains (weather, nearby) working otherwise.
+    const coords = location ?? FALLBACK_LOCATION;
+
     const voiceRequest = new window.Houndify.VoiceRequest({
         clientId,
         authURL: "/api/houndifyAuth",
@@ -25,9 +42,8 @@ export default function initVoiceRequest(
         //See https://houndify.com/reference/RequestInfo
         requestInfo: {
             UserID: "samuelwngundi02@gmail.com",
-            //See https://www.latlong.net/ for your own coordinates
-            Latitude: -1.292066,
-            Longitude: 36.821945,
+            Latitude: coords.latitude,
+            Longitude: coords.longitude,
         },
 
         //Pass the current ConversationState stored from previous queries

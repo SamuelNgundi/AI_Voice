@@ -1,16 +1,24 @@
+$primary: #0866ed;
+$periwinkle: #8fa9ff;
+
 .chatLog {
-    width: 90%;
-    max-width: 640px;
-    max-height: 35vh;
+    width: 100%;
+    max-width: 560px;
+    max-height: 34vh;
     overflow-y: auto;
-    margin: 20px auto 0;
+    margin: 6px auto 0;
     padding: 12px;
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(143, 169, 255, 0.3);
+    border-radius: 18px;
+    box-shadow: 0 8px 24px rgba(8, 102, 237, 0.08);
     text-align: left;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    // Keep the frosted panel feeling light and airy.
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
 }
 
 .turn {
@@ -20,24 +28,26 @@
 }
 
 .bubble {
-    padding: 8px 14px;
-    border-radius: 14px;
+    padding: 9px 14px;
+    border-radius: 16px;
     max-width: 85%;
-    line-height: 1.4;
+    line-height: 1.45;
     word-wrap: break-word;
     font-size: 14px;
 }
 
 .user {
     align-self: flex-end;
-    background: #2ebf91;
-    color: white;
-    border-bottom-right-radius: 4px;
+    background: $primary;
+    color: #ffffff;
+    border-bottom-right-radius: 6px;
+    box-shadow: 0 4px 12px rgba(8, 102, 237, 0.22);
 }
 
 .assistant {
     align-self: flex-start;
     background: #ffffff;
-    color: #333;
-    border-bottom-left-radius: 4px;
+    color: #111111;
+    border: 1px solid rgba(143, 169, 255, 0.35);
+    border-bottom-left-radius: 6px;
 }

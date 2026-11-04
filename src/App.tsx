@@ -24,6 +24,14 @@ const sources = {
 // Language code for spoken responses.
 const SPEECH_LANG = "en";
 
+// Coarse location resolved server-side from the client's IP and delivered
+// with the Houndify config (no geolocation permission prompt). Omitted when
+// the server couldn't resolve one; initVoiceRequest has a static fallback.
+interface AssistantLocation {
+    latitude: number;
+    longitude: number;
+}
+
 const say = (text: string) => {
     if (!text) return;
     // Fresh utterance per call; reusing a single SpeechSynthesisUtterance
@@ -61,6 +69,7 @@ function App() {
     const conversationState = useRef<HoundifyConversationState | null>(null);
     const voiceRequest = useRef<HoundifyVoiceRequest | null>(null);
     const clientIdRef = useRef<string | null>(null);
+    const locationRef = useRef<AssistantLocation | null>(null);
 
     // Single shared field value used for BOTH flows: typed manually or
     // overwritten by streaming voice transcription. The ref mirrors the
@@ -146,6 +155,10 @@ function App() {
             const outcome = await textQuery({
                 query: trimmed,
                 conversationState: conversationState.current,
+                // IP-derived coords when the server provided them; the
+                // server ignores non-numeric values, so null is safe.
+                latitude: locationRef.current?.latitude,
+                longitude: locationRef.current?.longitude,
             });
 
             if (!outcome.ok) {
@@ -256,6 +269,16 @@ function App() {
                     );
                 }
 
+                // Best-effort coarse location piggybacked on the config
+                // response; simply stays null when unavailable.
+                const { latitude, longitude } = config as {
+                    latitude?: unknown;
+                    longitude?: unknown;
+                };
+                if (typeof latitude === "number" && typeof longitude === "number") {
+                    locationRef.current = { latitude, longitude };
+                }
+
                 clientIdRef.current = config.clientId;
                 setClientId(config.clientId);
             } catch (error) {
@@ -308,7 +331,8 @@ function App() {
                         onResponse,
                         onTranscriptionUpdate,
                         onError,
-                    }
+                    },
+                    locationRef.current
                 );
             } catch (err) {
                 setError(
@@ -360,13 +384,16 @@ function App() {
         <div
             className={`${styles.root} ${recording ? styles.listening : ""}`.trim()}
         >
-            {/* Ambient, animated background layers (decorative). */}
-            <div className={`${styles.blob} ${styles.blobOne}`} aria-hidden="true" />
-            <div className={`${styles.blob} ${styles.blobTwo}`} aria-hidden="true" />
+            {/* Ambient, decorative layers: glossy orb hero + rising bubbles. */}
+            <div className={styles.orb} aria-hidden="true" />
+            <div className={styles.orbFade} aria-hidden="true" />
             <Bubbles active={recording} />
 
             <div className={styles.content}>
                 <h1 className={styles.h1}>Voice Assistant AI</h1>
+                <p className={styles.subtitle}>
+                    Ask anything, by voice or text. Your words are the interface.
+                </p>
                 <QueryBar
                     value={query}
                     onChange={setQuery}
